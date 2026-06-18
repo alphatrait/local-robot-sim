@@ -95,7 +95,7 @@ export function buildVisualsFromUrdf(
     mesh.receiveShadow = true;
 
     if (visual.geometry.kind === 'cylinder') {
-      mesh.rotateX(Math.PI / 2);
+      mesh.rotateZ(Math.PI / 2);
     }
 
     visuals.set(link.name, mesh);

@@ -128,10 +128,10 @@ function buildSceneFromUrdf(): void {
 
 function applyJointMotors(): void {
   for (const motor of revoluteMotors.values()) {
-    motor.joint.configureMotorVelocity(motor.targetVelocity, 2.0);
+    motor.joint.configureMotorVelocity(motor.targetVelocity, 40.0);
   }
   for (const motor of prismaticMotors.values()) {
-    motor.joint.configureMotorVelocity(motor.targetVelocity, 2.0);
+    motor.joint.configureMotorVelocity(motor.targetVelocity, 40.0);
   }
 }
 

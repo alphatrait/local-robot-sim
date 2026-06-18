@@ -102,8 +102,9 @@ function colliderFromGeometry(
       const radius = geometry.radius ?? 0.1;
       const length = geometry.length ?? 0.1;
       desc = R.ColliderDesc.cylinder(length / 2, radius);
-      const alignZ = rpyToQuaternion([Math.PI / 2, 0, 0]);
-      desc.setRotation(rapierRotation(alignZ));
+      // URDF cylinders are Z-aligned; Rapier uses Y. Roll axis is X (wheel axle).
+      const alignX = rpyToQuaternion([0, 0, Math.PI / 2]);
+      desc.setRotation(rapierRotation(alignX));
       break;
     }
     case 'sphere': {
@@ -118,7 +119,7 @@ function colliderFromGeometry(
   }
 
   desc.setTranslation(localOrigin.xyz[0], localOrigin.xyz[1], localOrigin.xyz[2]);
-  desc.setFriction(1.0);
+  desc.setFriction(1.2);
   desc.setRestitution(0.0);
   if (localOrigin.rpy.some((v) => v !== 0)) {
     const rot = rapierRotation(rpyToQuaternion(localOrigin.rpy));
@@ -149,25 +150,32 @@ export function buildRobotFromUrdf(
   const revoluteMotors = new Map<string, RevoluteMotor>();
   const prismaticMotors = new Map<string, PrismaticMotor>();
   const robotLinkNames = new Set(model.links.map((link) => link.name));
-  const root = findRootLink(model);
 
   for (const link of model.links) {
     const linkFrame = linkTransforms.get(link.name) ?? spawn;
-    const collision = link.collision ?? link.visual;
+    const collision = link.collision;
     const collisionOrigin = collision?.origin ?? { xyz: [0, 0, 0] as [number, number, number], rpy: [0, 0, 0] as [number, number, number] };
-    const geometry = collision?.geometry ?? { kind: 'box' as const, size: [0.1, 0.1, 0.1] };
+    const geometry = collision?.geometry;
 
-    const bodyPose = composeTransforms(linkFrame, collisionOrigin);
-    const isRoot = link.name === root;
+    const bodyPose = collision
+      ? composeTransforms(linkFrame, collisionOrigin)
+      : linkFrame;
 
-    const bodyDesc = (isRoot ? R.RigidBodyDesc.dynamic() : R.RigidBodyDesc.dynamic())
+    const bodyDesc = R.RigidBodyDesc.dynamic()
       .setTranslation(bodyPose.xyz[0], bodyPose.xyz[1], bodyPose.xyz[2])
       .setRotation(rapierRotation(bodyPose.quat))
       .setCanSleep(false);
 
+    if (!collision) {
+      bodyDesc.setAdditionalMass(2.0);
+    }
+
     const body = world.createRigidBody(bodyDesc);
-    const colliderDesc = colliderFromGeometry(R, geometry, { xyz: [0, 0, 0], rpy: [0, 0, 0] });
-    world.createCollider(colliderDesc, body);
+
+    if (collision && geometry) {
+      const colliderDesc = colliderFromGeometry(R, geometry, { xyz: [0, 0, 0], rpy: [0, 0, 0] });
+      world.createCollider(colliderDesc, body);
+    }
     bodies.set(link.name, body);
 
     trackedBodies.push({

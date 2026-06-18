@@ -6,11 +6,6 @@ export const DEFAULT_DIFF_DRIVE_URDF = `<?xml version="1.0"?>
         <box size="0.7 0.3 0.5"/>
       </geometry>
     </visual>
-    <collision>
-      <geometry>
-        <box size="0.7 0.3 0.5"/>
-      </geometry>
-    </collision>
   </link>
 
   <link name="left_wheel">
@@ -43,14 +38,14 @@ export const DEFAULT_DIFF_DRIVE_URDF = `<?xml version="1.0"?>
     <parent link="base_link"/>
     <child link="left_wheel"/>
     <origin xyz="-0.28 0.08 0" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
+    <axis xyz="1 0 0"/>
   </joint>
 
   <joint name="right_wheel_joint" type="continuous">
     <parent link="base_link"/>
     <child link="right_wheel"/>
     <origin xyz="0.28 0.08 0" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
+    <axis xyz="1 0 0"/>
   </joint>
 </robot>
 `;
