@@ -1,4 +1,4 @@
-﻿# Local Robot Sim
+# Local Robot Sim
 
 A browser-based robot simulator you can run without installing ROS, Gazebo, or MuJoCo. Edit Python controllers and URDF robots, hit save, and watch the sim update — all locally in your browser.
 
