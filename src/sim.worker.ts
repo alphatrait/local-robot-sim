@@ -128,11 +128,30 @@ function buildSceneFromUrdf(): void {
 
 function applyJointMotors(): void {
   for (const motor of revoluteMotors.values()) {
-    motor.joint.configureMotorVelocity(motor.targetVelocity, 40.0);
+    motor.joint?.configureMotorVelocity(motor.targetVelocity, 40.0);
   }
   for (const motor of prismaticMotors.values()) {
     motor.joint.configureMotorVelocity(motor.targetVelocity, 40.0);
   }
+}
+
+/** Diff-drive kinematics for fixed-wheel assemblies (v1 demo). */
+function applyDiffDriveKinematics(): void {
+  const left = revoluteMotors.get('left_wheel_joint')?.targetVelocity;
+  const right = revoluteMotors.get('right_wheel_joint')?.targetVelocity;
+  if (left === undefined || right === undefined) return;
+
+  const base = trackedBodies.find((b) => b.id === 'base_link');
+  if (!base) return;
+
+  const wheelRadius = 0.08;
+  const trackWidth = 0.56;
+  const linear = ((left + right) * 0.5) * wheelRadius;
+  const yawRate = ((right - left) / trackWidth) * wheelRadius;
+
+  const lv = base.body.linvel();
+  base.body.setLinvel({ x: lv.x, y: lv.y, z: linear }, true);
+  base.body.setAngvel({ x: 0, y: yawRate, z: 0 }, true);
 }
 
 function collectTransforms(): BodyTransform[] {
@@ -197,6 +216,7 @@ function simulationTick(): void {
 
   const dt = integrationParameters.dt;
   runControllerStep(dt);
+  applyDiffDriveKinematics();
   applyJointMotors();
   world.step();
   simTime += dt;

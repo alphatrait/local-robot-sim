@@ -16,7 +16,7 @@ export interface RapierTrackedBody {
 }
 
 export interface RevoluteMotor {
-  joint: RAPIER.RevoluteImpulseJoint;
+  joint?: RAPIER.RevoluteImpulseJoint;
   targetVelocity: number;
 }
 
@@ -150,6 +150,7 @@ export function buildRobotFromUrdf(
   const revoluteMotors = new Map<string, RevoluteMotor>();
   const prismaticMotors = new Map<string, PrismaticMotor>();
   const robotLinkNames = new Set(model.links.map((link) => link.name));
+  const root = findRootLink(model);
 
   for (const link of model.links) {
     const linkFrame = linkTransforms.get(link.name) ?? spawn;
@@ -165,6 +166,10 @@ export function buildRobotFromUrdf(
       .setTranslation(bodyPose.xyz[0], bodyPose.xyz[1], bodyPose.xyz[2])
       .setRotation(rapierRotation(bodyPose.quat))
       .setCanSleep(false);
+
+    if (link.name === root) {
+      bodyDesc.enabledRotations(false, true, false);
+    }
 
     if (!collision) {
       bodyDesc.setAdditionalMass(2.0);
@@ -235,6 +240,9 @@ export function buildRobotFromUrdf(
         childBody,
         true,
       );
+      if (joint.name.includes('wheel')) {
+        revoluteMotors.set(joint.name, { targetVelocity: 0 });
+      }
     }
   }
 

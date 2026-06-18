@@ -34,18 +34,16 @@ export const DEFAULT_DIFF_DRIVE_URDF = `<?xml version="1.0"?>
     </collision>
   </link>
 
-  <joint name="left_wheel_joint" type="continuous">
+  <joint name="left_wheel_joint" type="fixed">
     <parent link="base_link"/>
     <child link="left_wheel"/>
     <origin xyz="-0.28 0.08 0" rpy="0 0 0"/>
-    <axis xyz="1 0 0"/>
   </joint>
 
-  <joint name="right_wheel_joint" type="continuous">
+  <joint name="right_wheel_joint" type="fixed">
     <parent link="base_link"/>
     <child link="right_wheel"/>
     <origin xyz="0.28 0.08 0" rpy="0 0 0"/>
-    <axis xyz="1 0 0"/>
   </joint>
 </robot>
 `;

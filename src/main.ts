@@ -188,9 +188,13 @@ function rebuildRobotVisuals(): void {
 }
 
 function applyTransforms(bodies: BodyTransform[]): void {
+  let base: BodyTransform | undefined;
+
   for (const body of bodies) {
     const visual = bodyVisuals.get(body.id);
     if (!visual) continue;
+
+    if (body.id === 'base_link') base = body;
 
     scratchPosition.set(body.x, body.y, body.z);
     scratchQuaternion.set(body.qx, body.qy, body.qz, body.qw);
@@ -204,6 +208,10 @@ function applyTransforms(bodies: BodyTransform[]): void {
       visual.quaternion.copy(scratchQuaternion);
       visual.mesh.quaternion.copy(scratchQuaternion);
     }
+  }
+
+  if (base) {
+    controls.target.set(base.x, base.y + 0.25, base.z);
   }
 }
 
