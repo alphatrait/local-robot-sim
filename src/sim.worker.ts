@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import RAPIER from '@dimforge/rapier3d';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { loadPyodide, type PyodideInterface } from 'pyodide';
 import type {
   BodyTransform,
@@ -9,7 +9,7 @@ import type {
   WorkerToMainMessage,
 } from './types';
 import { DEFAULT_SIM_CONFIG } from './types';
-import { parseUrdf } from './urdf-parser';
+import type { UrdfModel } from './urdf-parser';
 import {
   buildGround,
   buildRobotFromUrdf,
@@ -33,7 +33,7 @@ let prismaticMotors: Map<string, PrismaticMotor> = new Map();
 let robotLinkNames = new Set<string>();
 
 let config: SimYamlConfig = DEFAULT_SIM_CONFIG;
-let urdfXml = '';
+let robotModel: UrdfModel | null = null;
 let simTime = 0;
 let loopHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -59,7 +59,7 @@ function spawnTransform(): Transform3D {
 
 async function bootRapier(): Promise<void> {
   try {
-    new RAPIER.World({ x: 0, y: -9.81, z: 0 }).free();
+    await RAPIER.init();
     rapierReady = true;
     log('info', 'Rapier Wasm ready');
   } catch (error) {
@@ -97,7 +97,7 @@ function clearWorld(): void {
 }
 
 function buildSceneFromUrdf(): void {
-  if (!rapierReady || !urdfXml) return;
+  if (!rapierReady || !robotModel) return;
 
   clearWorld();
 
@@ -110,13 +110,12 @@ function buildSceneFromUrdf(): void {
   trackedBodies.push(ground);
 
   try {
-    const model = parseUrdf(urdfXml);
-    const robot = buildRobotFromUrdf(RAPIER, world, model, spawnTransform());
+    const robot = buildRobotFromUrdf(RAPIER, world, robotModel, spawnTransform());
     trackedBodies.push(...robot.trackedBodies);
     robotLinkNames = robot.robotLinkNames;
     revoluteMotors = robot.revoluteMotors;
     prismaticMotors = robot.prismaticMotors;
-    log('info', `URDF loaded: ${model.name} (${model.links.length} links)`);
+    log('info', `URDF loaded: ${robotModel.name} (${robotModel.links.length} links)`);
     post({ type: 'WORLD_LOADED', linkNames: [...robotLinkNames] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -231,54 +230,55 @@ function softResetRobot(): void {
 
 function buildSimBridge(): string {
   return `
-import js
-
 class SimBridge:
     def log(self, message):
-        js.post_log(str(message))
+        post_log(str(message))
 
     def time(self):
-        return float(js.sim_time)
+        return float(sim_time)
 
     def get_body_pose(self, body_id):
-        return js.get_body_pose(str(body_id))
+        return get_body_pose(str(body_id))
 
     def get_joint_states(self):
-        return js.get_joint_states()
+        return get_joint_states()
 
     def set_joint_velocity(self, joint_name, velocity):
-        js.set_joint_velocity(str(joint_name), float(velocity))
+        set_joint_velocity(str(joint_name), float(velocity))
 
 sim = SimBridge()
 `;
 }
 
 async function mountControllerBridge(): Promise<void> {
-  if (!pyodide) return;
+  const py = pyodide;
+  if (!py) return;
 
-  await pyodide.runPythonAsync(buildSimBridge());
+  await py.runPythonAsync(buildSimBridge());
 
-  pyodide.globals.set('post_log', (message: string) => {
+  py.globals.set('post_log', (message: string) => {
     log('info', `[py] ${message}`);
   });
-  pyodide.globals.set('sim_time', 0);
+  py.globals.set('sim_time', 0);
 
-  pyodide.globals.set('get_body_pose', (bodyId: string) => {
+  py.globals.set('get_body_pose', (bodyId: string) => {
     const tracked = trackedBodies.find((b) => b.id === bodyId);
-    if (!tracked) return { x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 };
+    if (!tracked) {
+      return py.toPy({ x: 0, y: 0, z: 0, qx: 0, qy: 0, qz: 0, qw: 1 });
+    }
     const t = tracked.body.translation();
     const r = tracked.body.rotation();
-    return { x: t.x, y: t.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w };
+    return py.toPy({ x: t.x, y: t.y, z: t.z, qx: r.x, qy: r.y, qz: r.z, qw: r.w });
   });
 
-  pyodide.globals.set('get_joint_states', () => {
+  py.globals.set('get_joint_states', () => {
     const out: Record<string, number> = {};
     for (const [name, motor] of revoluteMotors.entries()) out[name] = motor.targetVelocity;
     for (const [name, motor] of prismaticMotors.entries()) out[name] = motor.targetVelocity;
-    return out;
+    return py.toPy(out);
   });
 
-  pyodide.globals.set('set_joint_velocity', (jointName: string, velocity: number) => {
+  py.globals.set('set_joint_velocity', (jointName: string, velocity: number) => {
     const revolute = revoluteMotors.get(jointName);
     if (revolute) {
       revolute.targetVelocity = velocity;
@@ -323,24 +323,43 @@ async function loadController(python: string, softReset: boolean): Promise<void>
 
 async function handleInit(message: Extract<MainToWorkerMessage, { type: 'INIT' }>): Promise<void> {
   config = message.config;
-  urdfXml = message.urdfXml;
-  await bootRapier();
-  await bootPyodide(message.pyodideIndexUrl);
-  buildSceneFromUrdf();
-  post({ type: 'READY', rapierReady, pyodideReady });
+  robotModel = message.robotModel;
+  log('info', 'Worker INIT received');
 
-  if (pendingPython) {
-    const source = pendingPython;
-    pendingPython = null;
-    await loadController(source, true);
+  await bootRapier();
+  log('info', 'Rapier boot complete');
+
+  try {
+    buildSceneFromUrdf();
+  } catch (error) {
+    const errMessage = error instanceof Error ? error.message : String(error);
+    post({ type: 'ERROR', message: `Scene build failed: ${errMessage}` });
+    throw error;
   }
+
+  post({ type: 'READY', rapierReady, pyodideReady: false });
+
+  void bootPyodide(message.pyodideIndexUrl)
+    .then(async () => {
+      post({ type: 'READY', rapierReady, pyodideReady: true });
+      log('info', 'Pyodide boot complete');
+      if (pendingPython) {
+        const source = pendingPython;
+        pendingPython = null;
+        await loadController(source, true);
+      }
+    })
+    .catch((error) => {
+      const errMessage = error instanceof Error ? error.message : String(error);
+      post({ type: 'ERROR', message: `Pyodide boot failed: ${errMessage}` });
+    });
 }
 
 async function handleLoadWorld(
   message: Extract<MainToWorkerMessage, { type: 'LOAD_WORLD' }>,
 ): Promise<void> {
   config = message.config;
-  urdfXml = message.urdfXml;
+  robotModel = message.robotModel;
   buildSceneFromUrdf();
 }
 

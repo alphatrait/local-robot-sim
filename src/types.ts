@@ -76,13 +76,13 @@ export interface WorkerInitMessage {
   type: 'INIT';
   pyodideIndexUrl: string;
   config: SimYamlConfig;
-  urdfXml: string;
+  robotModel: import('./urdf-parser').UrdfModel;
 }
 
 export interface WorkerLoadWorldMessage {
   type: 'LOAD_WORLD';
   config: SimYamlConfig;
-  urdfXml: string;
+  robotModel: import('./urdf-parser').UrdfModel;
 }
 
 export interface WorkerReloadControllerMessage {

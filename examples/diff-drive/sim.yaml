@@ -2,7 +2,7 @@ version: 1
 
 robot:
   urdf: robot/demo_mobile.urdf
-  spawn: [0, 0.25, 0]
+  spawn: [0, 0.05, 0]
 
 controller:
   path: controllers/main.py

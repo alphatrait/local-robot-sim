@@ -1,4 +1,4 @@
-import type RAPIER from '@dimforge/rapier3d';
+import type RAPIER from '@dimforge/rapier3d-compat';
 import type { UrdfGeometry, UrdfJoint, UrdfModel } from './urdf-parser';
 import {
   composeTransforms,
@@ -118,6 +118,8 @@ function colliderFromGeometry(
   }
 
   desc.setTranslation(localOrigin.xyz[0], localOrigin.xyz[1], localOrigin.xyz[2]);
+  desc.setFriction(1.0);
+  desc.setRestitution(0.0);
   if (localOrigin.rpy.some((v) => v !== 0)) {
     const rot = rapierRotation(rpyToQuaternion(localOrigin.rpy));
     desc.setRotation(rot);
@@ -233,7 +235,10 @@ export function buildRobotFromUrdf(
 
 export function buildGround(R: typeof RAPIER, world: RAPIER.World): RapierTrackedBody {
   const groundBody = world.createRigidBody(R.RigidBodyDesc.fixed());
-  world.createCollider(R.ColliderDesc.cuboid(20, 0.05, 20), groundBody);
+  const ground = R.ColliderDesc.cuboid(20, 0.05, 20);
+  ground.setFriction(1.0);
+  ground.setRestitution(0.0);
+  world.createCollider(ground, groundBody);
   return {
     id: 'ground',
     body: groundBody,

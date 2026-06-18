@@ -59,6 +59,7 @@ let project: ProjectContext = DEFAULT_PROJECT_CONTEXT;
 let urdfXml = DEFAULT_DIFF_DRIVE_URDF;
 let worker: Worker | null = null;
 let workerReady = false;
+let pendingSyncBundle: SyncBundle | null = null;
 let repoHandle: FileSystemDirectoryHandle | null = null;
 let localSync: LocalFolderSync | null = null;
 let githubSync: GitHubSync | null = null;
@@ -118,7 +119,20 @@ function setStatus(text: string): void {
 
 function pyodideIndexUrl(): string {
   const base = import.meta.env.BASE_URL ?? '/';
+  // Copied assets for production; Vite serves the same path in dev via static-copy.
   return `${self.location.origin}${base}pyodide/`;
+}
+
+function applyPendingSyncIfReady(): void {
+  if (!workerReady || !pendingSyncBundle) return;
+  const bundle = pendingSyncBundle;
+  pendingSyncBundle = null;
+  applySyncBundle(bundle, false);
+}
+
+function flushWorldFromState(): void {
+  loadWorld();
+  reloadController(controllerSourceEl.value, false);
 }
 
 function currentProjectRoot(): string {
@@ -222,6 +236,10 @@ async function loadExamplesManifest(): Promise<void> {
   if (manifest) populateExampleSelect(manifest.examples);
 }
 
+function robotModelFromUrdf(): ReturnType<typeof parseUrdf> {
+  return parseUrdf(urdfXml);
+}
+
 function spawnWorker(): Worker {
   const simWorker = new Worker(new URL('./sim.worker.ts', import.meta.url), { type: 'module' });
 
@@ -231,11 +249,19 @@ function spawnWorker(): Worker {
       case 'READY':
         workerReady = true;
         setStatus(
-          `Worker ready\nRapier: ${message.rapierReady ? 'yes' : 'no'}\nPyodide: ${message.pyodideReady ? 'yes' : 'no'}\nProject: ${project.root || '(repo root)'}`,
+          `Worker ready\nRapier: ${message.rapierReady ? 'yes' : 'no'}\nPyodide: ${message.pyodideReady ? 'yes' : 'pending…'}\nProject: ${project.root || '(repo root)'}`,
         );
-        appendLog('Simulation worker ready');
-        rebuildRobotVisuals();
-        reloadController(controllerSourceEl.value, false);
+        if (message.pyodideReady) {
+          appendLog('Pyodide ready');
+          reloadController(controllerSourceEl.value, false);
+          break;
+        }
+        appendLog('Simulation worker ready (physics)');
+        if (pendingSyncBundle) {
+          applyPendingSyncIfReady();
+        } else {
+          flushWorldFromState();
+        }
         break;
       case 'WORLD_LOADED':
         appendLog(`Physics world: ${message.linkNames.join(', ')}`);
@@ -271,7 +297,7 @@ function spawnWorker(): Worker {
     type: 'INIT',
     pyodideIndexUrl: pyodideIndexUrl(),
     config,
-    urdfXml,
+    robotModel: robotModelFromUrdf(),
   });
 
   return simWorker;
@@ -283,7 +309,7 @@ function loadWorld(): void {
   worker.postMessage({
     type: 'LOAD_WORLD',
     config,
-    urdfXml,
+    robotModel: robotModelFromUrdf(),
   });
 }
 
@@ -297,12 +323,19 @@ function reloadController(python: string, softReset = true): void {
   });
 }
 
-function applySyncBundle(bundle: SyncBundle): void {
+function applySyncBundle(bundle: SyncBundle, queueIfBooting = true): void {
   project = bundle.project;
   config = bundle.config;
   urdfXml = bundle.urdfXml;
   projectRootEl.value = bundle.project.root;
   controllerSourceEl.value = bundle.controllerPython;
+
+  if (!workerReady && queueIfBooting) {
+    pendingSyncBundle = bundle;
+    appendLog(`Queued GitHub sync ${bundle.project.root || 'repo root'} (worker booting)`);
+    return;
+  }
+
   loadWorld();
   reloadController(bundle.controllerPython, true);
   appendLog(`Synced ${bundle.project.root || 'repo root'} @ ${bundle.revision.slice(0, 12)}…`);

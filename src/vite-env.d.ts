@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+declare module '*?init' {
+  const init: (options?: WebAssembly.Imports) => Promise<WebAssembly.Instance>;
+  export default init;
+}
+
 interface FileSystemHandle {
   readonly kind: 'file' | 'directory';
   readonly name: string;
