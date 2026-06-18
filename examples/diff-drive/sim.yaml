@@ -1,0 +1,23 @@
+version: 1
+
+robot:
+  urdf: robot/demo_mobile.urdf
+  spawn: [0, 0.25, 0]
+
+controller:
+  path: controllers/main.py
+  entrypoint: main
+  loop_hz: 60
+  max_step_ms: 8
+  max_violations: 3
+
+simulation:
+  gravity: [0, -9.81, 0]
+  physics_hz: 60
+
+reload:
+  policy: soft_reset
+
+sync:
+  mode: local
+  poll_interval_sec: 15

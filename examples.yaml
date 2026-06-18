@@ -1,0 +1,4 @@
+examples:
+  - id: diff-drive
+    path: examples/diff-drive
+    label: Differential drive box

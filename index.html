@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Robot Sim</title>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0f1117;
+        color: #e8eaed;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      #app {
+        display: grid;
+        grid-template-columns: 1fr 360px;
+        width: 100%;
+        height: 100%;
+      }
+
+      #viewport {
+        position: relative;
+        min-width: 0;
+      }
+
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding: 16px;
+        border-left: 1px solid #2a2f3a;
+        background: #151922;
+        overflow-y: auto;
+      }
+
+      h1 {
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #9aa0a6;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      label {
+        font-size: 11px;
+        color: #9aa0a6;
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+        border-radius: 6px;
+        border: 1px solid #3c4454;
+        background: #0f1117;
+        color: #e8eaed;
+        padding: 8px 10px;
+      }
+
+      textarea {
+        min-height: 180px;
+        resize: vertical;
+        line-height: 1.4;
+      }
+
+      button {
+        cursor: pointer;
+        background: #1a73e8;
+        border-color: #1a73e8;
+        font-weight: 600;
+      }
+
+      button:hover {
+        filter: brightness(1.08);
+      }
+
+      button.secondary {
+        background: #252b36;
+        border-color: #3c4454;
+      }
+
+      #status {
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        color: #bdc1c6;
+      }
+
+      #log {
+        flex: 1;
+        min-height: 120px;
+        overflow-y: auto;
+        font-size: 11px;
+        line-height: 1.45;
+        color: #9aa0a6;
+        border: 1px solid #2a2f3a;
+        border-radius: 6px;
+        padding: 8px;
+        background: #0f1117;
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        margin-right: 6px;
+      }
+
+      .badge.ok {
+        background: #1e3a2f;
+        color: #81c995;
+      }
+
+      .badge.warn {
+        background: #3a2e1e;
+        color: #fdd663;
+      }
+
+      .badge.err {
+        background: #3a1e1e;
+        color: #f28b82;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport"></div>
+      <aside id="sidebar">
+        <h1>Local Robot Sim</h1>
+        <div id="status">Booting…</div>
+        <div class="panel">
+          <label for="sync-mode">Sync mode</label>
+          <select id="sync-mode">
+            <option value="local">Local folder (instant)</option>
+            <option value="github">GitHub (remote)</option>
+            <option value="manual">Manual paste</option>
+          </select>
+        </div>
+        <div class="panel">
+          <label for="project-root">Project root (inside repo)</label>
+          <input id="project-root" type="text" placeholder="examples/diff-drive or empty for repo root" />
+        </div>
+        <div class="panel">
+          <label for="example-select">Example (from examples.yaml)</label>
+          <select id="example-select">
+            <option value="">— custom path above —</option>
+          </select>
+        </div>
+        <div class="panel" id="github-panel" hidden>
+          <label for="github-repo">GitHub repo (owner/name)</label>
+          <input id="github-repo" type="text" placeholder="you/my-robot-project" />
+          <label for="github-branch">Branch</label>
+          <input id="github-branch" type="text" value="main" />
+          <label for="github-token">PAT (optional, for API polling)</label>
+          <input id="github-token" type="password" placeholder="ghp_…" autocomplete="off" />
+        </div>
+        <div class="panel">
+          <button id="pick-folder" class="secondary">Pick project folder</button>
+          <button id="reload-controller">Reload controller</button>
+          <button id="soft-reset" class="secondary">Soft reset robot</button>
+        </div>
+        <div class="panel">
+          <label for="controller-source">Controller (Python)</label>
+          <textarea id="controller-source" spellcheck="false"></textarea>
+        </div>
+        <div class="panel">
+          <label>Log</label>
+          <div id="log"></div>
+        </div>
+      </aside>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
