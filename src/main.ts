@@ -3,12 +3,24 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type {
   BodyTransform,
   ProjectContext,
-  SimYamlConfig,
+  RobotYamlConfig,
+  SimConfig,
   SyncBundle,
   WorkerToMainMessage,
+  WorldYamlConfig,
 } from './types';
 import { DEFAULT_PROJECT_CONTEXT, DEFAULT_SIM_CONFIG } from './types';
 import { DEFAULT_DIFF_DRIVE_URDF } from './default-urdf';
+import {
+  resolveSpawnConfig,
+  spawnToTransform,
+} from './sim-config';
+import {
+  applyEnvVisualSettings,
+  buildEnvVisuals,
+  buildLegacyEnvVisuals,
+  type EnvVisualBuildResult,
+} from './world-visuals';
 import {
   GitHubSync,
   LocalFolderSync,
@@ -24,6 +36,8 @@ import {
 import { normalizeProjectRoot } from './project-path';
 import { parseUrdf } from './urdf-parser';
 import { buildVisualsFromUrdf, disposeRobotVisuals } from './urdf-visuals';
+import { loadBundledSimulation } from './bundled-sync';
+import { LogView } from './log-view';
 
 const DEFAULT_CONTROLLER = `def init(sim):
     sim.log("diff-drive controller ready")
@@ -42,6 +56,11 @@ interface BodyVisual {
 const viewport = document.querySelector('#viewport') as HTMLDivElement;
 const statusEl = document.querySelector('#status') as HTMLDivElement;
 const logEl = document.querySelector('#log') as HTMLDivElement;
+const logMeasurerEl = document.querySelector('#log-measurer') as HTMLDivElement;
+const logPageEl = document.querySelector('#log-page') as HTMLSpanElement;
+const logPrevBtn = document.querySelector('#log-prev') as HTMLButtonElement;
+const logNextBtn = document.querySelector('#log-next') as HTMLButtonElement;
+const logFilterButtons = document.querySelectorAll<HTMLButtonElement>('.filter-chip');
 const syncModeEl = document.querySelector('#sync-mode') as HTMLSelectElement;
 const githubPanel = document.querySelector('#github-panel') as HTMLDivElement;
 const githubRepoEl = document.querySelector('#github-repo') as HTMLInputElement;
@@ -50,13 +69,18 @@ const githubTokenEl = document.querySelector('#github-token') as HTMLInputElemen
 const projectRootEl = document.querySelector('#project-root') as HTMLInputElement;
 const exampleSelectEl = document.querySelector('#example-select') as HTMLSelectElement;
 const pickFolderBtn = document.querySelector('#pick-folder') as HTMLButtonElement;
+const pauseBtn = document.querySelector('#pause-simulation') as HTMLButtonElement;
 const reloadBtn = document.querySelector('#reload-controller') as HTMLButtonElement;
 const softResetBtn = document.querySelector('#soft-reset') as HTMLButtonElement;
 const controllerSourceEl = document.querySelector('#controller-source') as HTMLTextAreaElement;
+const tabButtons = document.querySelectorAll<HTMLButtonElement>('.tab');
+const tabPanels = document.querySelectorAll<HTMLElement>('[data-tab-panel]');
 
-let config: SimYamlConfig = DEFAULT_SIM_CONFIG;
+let config: SimConfig = DEFAULT_SIM_CONFIG;
 let project: ProjectContext = DEFAULT_PROJECT_CONTEXT;
 let urdfXml = DEFAULT_DIFF_DRIVE_URDF;
+let envModel: WorldYamlConfig | undefined;
+let robotMeta: RobotYamlConfig | undefined;
 let worker: Worker | null = null;
 let workerReady = false;
 let pendingSyncBundle: SyncBundle | null = null;
@@ -64,6 +88,7 @@ let repoHandle: FileSystemDirectoryHandle | null = null;
 let localSync: LocalFolderSync | null = null;
 let githubSync: GitHubSync | null = null;
 let robotVisualObjects = new Map<string, THREE.Object3D>();
+let simulationPaused = false;
 
 const bodyVisuals = new Map<string, BodyVisual>();
 const scratchPosition = new THREE.Vector3();
@@ -76,8 +101,7 @@ renderer.shadowMap.enabled = true;
 viewport.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0f1117);
-scene.fog = new THREE.Fog(0x0f1117, 20, 80);
+applyEnvVisualSettings(scene);
 
 const camera = new THREE.PerspectiveCamera(55, 1, 0.05, 200);
 camera.position.set(3.5, 2.5, 4.5);
@@ -92,29 +116,40 @@ sun.position.set(6, 10, 4);
 sun.castShadow = true;
 scene.add(sun);
 
-scene.add(new THREE.GridHelper(40, 40, 0x3a4254, 0x252b36));
+const envGroup = new THREE.Group();
+scene.add(envGroup);
+let envVisuals: EnvVisualBuildResult = buildLegacyEnvVisuals();
+envGroup.add(envVisuals.group);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(40, 40),
-  new THREE.MeshStandardMaterial({ color: 0x151922, roughness: 0.95 }),
-);
-ground.rotation.x = -Math.PI / 2;
-ground.receiveShadow = true;
-scene.add(ground);
+const logView = new LogView({
+  listEl: logEl,
+  measurerEl: logMeasurerEl,
+  pageLabelEl: logPageEl,
+  prevBtn: logPrevBtn,
+  nextBtn: logNextBtn,
+  filterButtons: [...logFilterButtons],
+});
 
 function appendLog(message: string, level: 'info' | 'warn' | 'error' = 'info'): void {
-  const line = document.createElement('div');
-  const badge = document.createElement('span');
-  badge.className = `badge ${level === 'info' ? 'ok' : level === 'warn' ? 'warn' : 'err'}`;
-  badge.textContent = level.toUpperCase();
-  line.appendChild(badge);
-  line.appendChild(document.createTextNode(message));
-  logEl.appendChild(line);
-  logEl.scrollTop = logEl.scrollHeight;
+  logView.append(message, level);
 }
 
 function setStatus(text: string): void {
   statusEl.textContent = text;
+}
+
+function selectTab(name: string): void {
+  tabButtons.forEach((btn) => {
+    const active = btn.dataset.tab === name;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  tabPanels.forEach((panel) => {
+    panel.classList.toggle('active', panel.dataset.tabPanel === name);
+  });
+  if (name === 'logs') {
+    requestAnimationFrame(() => logView.relayout());
+  }
 }
 
 function pyodideIndexUrl(): string {
@@ -156,6 +191,16 @@ function ensureBodyVisual(id: string, object: THREE.Object3D): BodyVisual {
   return visual;
 }
 
+function rebuildEnvVisuals(model?: WorldYamlConfig): void {
+  envVisuals.dispose();
+  envGroup.clear();
+
+  envVisuals = model ? buildEnvVisuals(model) : buildLegacyEnvVisuals();
+  envGroup.add(envVisuals.group);
+  applyEnvVisualSettings(scene, model);
+  appendLog(`Environment visuals rebuilt${model?.name ? `: ${model.name}` : ''}`);
+}
+
 function rebuildRobotVisuals(): void {
   for (const object of robotVisualObjects.values()) {
     scene.remove(object);
@@ -171,11 +216,8 @@ function rebuildRobotVisuals(): void {
 
   try {
     const model = parseUrdf(urdfXml);
-    const spawn = config.robot.spawn ?? [0, 0.25, 0];
-    robotVisualObjects = buildVisualsFromUrdf(model, {
-      xyz: spawn,
-      quat: [0, 0, 0, 1],
-    });
+    const spawn = spawnToTransform(resolveSpawnConfig(config));
+    robotVisualObjects = buildVisualsFromUrdf(model, spawn);
 
     for (const [id, mesh] of robotVisualObjects.entries()) {
       ensureBodyVisual(id, mesh);
@@ -292,6 +334,10 @@ function spawnWorker(): Worker {
       case 'ERROR':
         appendLog(message.message, 'error');
         break;
+      case 'PAUSED':
+        simulationPaused = message.paused;
+        pauseBtn.textContent = message.paused ? 'Resume' : 'Pause';
+        break;
       default:
         break;
     }
@@ -305,7 +351,9 @@ function spawnWorker(): Worker {
     type: 'INIT',
     pyodideIndexUrl: pyodideIndexUrl(),
     config,
+    envModel,
     robotModel: robotModelFromUrdf(),
+    robotMeta,
   });
 
   return simWorker;
@@ -313,11 +361,14 @@ function spawnWorker(): Worker {
 
 function loadWorld(): void {
   if (!worker || !workerReady) return;
+  rebuildEnvVisuals(envModel);
   rebuildRobotVisuals();
   worker.postMessage({
     type: 'LOAD_WORLD',
     config,
+    envModel,
     robotModel: robotModelFromUrdf(),
+    robotMeta,
   });
 }
 
@@ -335,18 +386,38 @@ function applySyncBundle(bundle: SyncBundle, queueIfBooting = true): void {
   project = bundle.project;
   config = bundle.config;
   urdfXml = bundle.urdfXml;
+  envModel = bundle.envModel;
+  robotMeta = bundle.robotMeta;
   projectRootEl.value = bundle.project.root;
   controllerSourceEl.value = bundle.controllerPython;
 
+  if (bundle.resolvedPaths.environment) {
+    appendLog(`Env: ${bundle.resolvedPaths.environment}`);
+  }
+  appendLog(`Bot: ${bundle.resolvedPaths.robotUrdf}`);
+  appendLog(
+    `Controller: ${bundle.controllerSource}${bundle.controllerSource !== 'none' ? ` (${bundle.resolvedPaths.controller})` : ''}`,
+  );
+
   if (!workerReady && queueIfBooting) {
     pendingSyncBundle = bundle;
-    appendLog(`Queued GitHub sync ${bundle.project.root || 'repo root'} (worker booting)`);
+    appendLog(`Queued sync ${bundle.project.root || 'repo root'} (worker booting)`);
     return;
   }
 
   loadWorld();
   reloadController(bundle.controllerPython, true);
   appendLog(`Synced ${bundle.project.root || 'repo root'} @ ${bundle.revision.slice(0, 12)}…`);
+}
+
+async function loadBundledProject(root: string): Promise<void> {
+  try {
+    const bundle = await loadBundledSimulation(root);
+    applySyncBundle(bundle);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appendLog(`Bundled load failed: ${message}`, 'error');
+  }
 }
 
 function stopSync(): void {
@@ -424,8 +495,18 @@ window.addEventListener('resize', resize);
 resize();
 animate();
 
+tabButtons.forEach((btn) => {
+  btn.addEventListener('click', () => {
+    if (btn.dataset.tab) selectTab(btn.dataset.tab);
+  });
+});
+
 reloadBtn.addEventListener('click', () => {
   reloadController(controllerSourceEl.value, true);
+});
+
+pauseBtn.addEventListener('click', () => {
+  worker?.postMessage({ type: 'SET_PAUSED', paused: !simulationPaused });
 });
 
 softResetBtn.addEventListener('click', () => {
@@ -454,6 +535,10 @@ projectRootEl.addEventListener('change', () => {
   if (githubSync) {
     githubSync.setProjectRoot(currentProjectRoot());
     void githubSync.readOnce().then((bundle) => applySyncBundle(bundle));
+    return;
+  }
+  if (syncModeEl.value === 'manual' && currentProjectRoot()) {
+    void loadBundledProject(currentProjectRoot());
   }
 });
 
@@ -462,9 +547,11 @@ exampleSelectEl.addEventListener('change', () => {
   projectRootEl.value = exampleSelectEl.value;
   project = { root: currentProjectRoot() };
   if (localSync && repoHandle) void refreshLocalSync();
-  if (githubSync) {
+  else if (githubSync) {
     githubSync.setProjectRoot(currentProjectRoot());
     void githubSync.readOnce().then((bundle) => applySyncBundle(bundle));
+  } else {
+    void loadBundledProject(currentProjectRoot());
   }
 });
 
@@ -499,7 +586,12 @@ if (repoParam) {
     .then((response) => (response.ok ? response.text() : null))
     .then((raw) => {
       if (!raw) return;
-      populateExampleSelect(parseExamplesManifest(raw).examples);
+      const examples = parseExamplesManifest(raw).examples;
+      populateExampleSelect(examples);
+      if (rootParam) {
+        exampleSelectEl.value = rootParam;
+        void loadBundledProject(rootParam);
+      }
     })
     .catch(() => {
       /* optional bundled examples manifest */

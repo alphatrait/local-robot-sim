@@ -1,145 +1,130 @@
-import type { SimYamlConfig } from './types';
+import type { SimConfig, SimYamlConfigV1, SimYamlConfigV2, SpawnConfig, ReloadConfig, SyncConfig } from './types';
 import { DEFAULT_SIM_CONFIG } from './types';
+import {
+  asNumber,
+  asRecord,
+  asString,
+  asVec3,
+  asVec4,
+  parseYamlDocument,
+} from './yaml-subset';
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+function parseControllerBlock(controller: Record<string, unknown>) {
+  return {
+    path: asString(controller.path, DEFAULT_SIM_CONFIG.controller.path),
+    entrypoint: asString(controller.entrypoint, DEFAULT_SIM_CONFIG.controller.entrypoint),
+    loop_hz: asNumber(controller.loop_hz, DEFAULT_SIM_CONFIG.controller.loop_hz),
+    max_step_ms: asNumber(
+      controller.max_step_ms,
+      DEFAULT_SIM_CONFIG.controller.max_step_ms ?? 8,
+    ),
+    max_violations: asNumber(
+      controller.max_violations,
+      DEFAULT_SIM_CONFIG.controller.max_violations ?? 3,
+    ),
+  };
 }
 
-function asNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function asString(value: unknown, fallback: string): string {
-  return typeof value === 'string' && value.length > 0 ? value : fallback;
-}
-
-function asVec3(value: unknown, fallback: [number, number, number]): [number, number, number] {
-  if (!Array.isArray(value) || value.length !== 3) return fallback;
-  const [x, y, z] = value;
-  if ([x, y, z].every((n) => typeof n === 'number' && Number.isFinite(n))) {
-    return [x, y, z];
+function parseReload(reload: Record<string, unknown> | null): ReloadConfig | undefined {
+  if (!reload) return undefined;
+  const policy = reload.policy;
+  if (policy === 'soft_reset' || policy === 'preserve_physics' || policy === 'pause_then_reset') {
+    return { policy };
   }
-  return fallback;
+  return undefined;
 }
 
-/**
- * Parses sim.yaml with unknown keys ignored for forward compatibility.
- */
-export function parseSimYaml(raw: string): SimYamlConfig {
-  let parsed: unknown;
-  try {
-    parsed = parseYamlSubset(raw);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to parse sim.yaml: ${message}`);
+function parseSync(sync: Record<string, unknown> | null): SyncConfig | undefined {
+  if (!sync) return undefined;
+  const mode = sync.mode;
+  if (mode !== 'local' && mode !== 'github') return undefined;
+  return {
+    mode,
+    poll_interval_sec:
+      typeof sync.poll_interval_sec === 'number' ? sync.poll_interval_sec : undefined,
+  };
+}
+
+function parseSpawnBlock(spawn: Record<string, unknown> | null): SpawnConfig {
+  if (!spawn) {
+    return { position: [0, 0.05, 0], rotation: [0, 0, 0, 1] };
   }
 
-  const root = asRecord(parsed);
-  if (!root) {
-    throw new Error('sim.yaml root must be a mapping');
+  const position = asVec3(spawn.position, [0, 0.05, 0]);
+  const rotation = spawn.rotation ? asVec4(spawn.rotation, [0, 0, 0, 1]) : [0, 0, 0, 1] as [number, number, number, number];
+
+  return { position, rotation };
+}
+
+function parseSimYamlV2(root: Record<string, unknown>): SimYamlConfigV2 {
+  const controller = asRecord(root.controller);
+  const simulation = asRecord(root.simulation) ?? {};
+  const spawn = asRecord(root.spawn);
+
+  if (simulation.gravity !== undefined) {
+    console.warn('[sim.yaml] simulation.gravity is ignored in v2 — set gravity in env/world.yaml');
   }
 
+  const config: SimYamlConfigV2 = {
+    version: 2,
+    environment: typeof root.environment === 'string' ? root.environment : undefined,
+    robot: typeof root.robot === 'string' ? root.robot : undefined,
+    spawn: parseSpawnBlock(spawn),
+    simulation: {
+      physics_hz: asNumber(simulation.physics_hz, DEFAULT_SIM_CONFIG.simulation.physics_hz),
+    },
+  };
+
+  if (controller) {
+    config.controller = parseControllerBlock(controller);
+  }
+
+  const reload = parseReload(asRecord(root.reload));
+  if (reload) config.reload = reload;
+
+  const sync = parseSync(asRecord(root.sync));
+  if (sync) config.sync = sync;
+
+  return config;
+}
+
+function parseSimYamlV1(root: Record<string, unknown>): SimYamlConfigV1 {
   const robot = asRecord(root.robot) ?? {};
   const controller = asRecord(root.controller) ?? {};
   const simulation = asRecord(root.simulation) ?? {};
-  const reload = asRecord(root.reload);
 
-  const config: SimYamlConfig = {
+  const config: SimYamlConfigV1 = {
     version: asNumber(root.version, DEFAULT_SIM_CONFIG.version),
     robot: {
       urdf: asString(robot.urdf, DEFAULT_SIM_CONFIG.robot.urdf),
       spawn: asVec3(robot.spawn, DEFAULT_SIM_CONFIG.robot.spawn ?? [0, 0.25, 0]),
     },
-    controller: {
-      path: asString(controller.path, DEFAULT_SIM_CONFIG.controller.path),
-      entrypoint: asString(controller.entrypoint, DEFAULT_SIM_CONFIG.controller.entrypoint),
-      loop_hz: asNumber(controller.loop_hz, DEFAULT_SIM_CONFIG.controller.loop_hz),
-      max_step_ms: asNumber(
-        controller.max_step_ms,
-        DEFAULT_SIM_CONFIG.controller.max_step_ms ?? 8,
-      ),
-      max_violations: asNumber(
-        controller.max_violations,
-        DEFAULT_SIM_CONFIG.controller.max_violations ?? 3,
-      ),
-    },
+    controller: parseControllerBlock(controller),
     simulation: {
       gravity: asVec3(simulation.gravity, DEFAULT_SIM_CONFIG.simulation.gravity),
       physics_hz: asNumber(simulation.physics_hz, DEFAULT_SIM_CONFIG.simulation.physics_hz),
     },
   };
 
-  if (reload) {
-    const policy = reload.policy;
-    if (policy === 'soft_reset' || policy === 'preserve_physics' || policy === 'pause_then_reset') {
-      config.reload = { policy };
-    }
-  }
+  const reload = parseReload(asRecord(root.reload));
+  if (reload) config.reload = reload;
+
+  const sync = parseSync(asRecord(root.sync));
+  if (sync) config.sync = sync;
 
   return config;
 }
 
 /**
- * Minimal YAML parser for the flat sim.yaml schema (no external deps).
+ * Parses sim.yaml with unknown keys ignored for forward compatibility.
  */
-function parseYamlSubset(raw: string): unknown {
-  const lines = raw.replace(/\r\n/g, '\n').split('\n');
-  const root: Record<string, unknown> = {};
-  const stack: Array<{ indent: number; obj: Record<string, unknown> }> = [
-    { indent: -1, obj: root },
-  ];
+export function parseSimYaml(raw: string): SimConfig {
+  const root = parseYamlDocument(raw, 'sim.yaml');
+  const version = asNumber(root.version, DEFAULT_SIM_CONFIG.version);
 
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-
-    const indent = line.match(/^\s*/)?.[0].length ?? 0;
-    while (stack.length > 1 && indent <= stack[stack.length - 1].indent) {
-      stack.pop();
-    }
-
-    const current = stack[stack.length - 1].obj;
-    const colonIndex = trimmed.indexOf(':');
-    if (colonIndex === -1) continue;
-
-    const key = trimmed.slice(0, colonIndex).trim();
-    const valuePart = trimmed.slice(colonIndex + 1).trim();
-
-    if (valuePart === '') {
-      const child: Record<string, unknown> = {};
-      current[key] = child;
-      stack.push({ indent, obj: child });
-      continue;
-    }
-
-    current[key] = parseScalar(valuePart);
+  if (version >= 2 || typeof root.environment === 'string') {
+    return parseSimYamlV2(root);
   }
 
-  return root;
-}
-
-function parseScalar(value: string): unknown {
-  if (value.startsWith('[') && value.endsWith(']')) {
-    const inner = value.slice(1, -1).trim();
-    if (!inner) return [];
-    return inner.split(',').map((part) => parseScalar(part.trim()));
-  }
-
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-
-  if (value === 'true') return true;
-  if (value === 'false') return false;
-  if (value === 'null') return null;
-
-  const num = Number(value);
-  if (!Number.isNaN(num)) return num;
-
-  return value;
+  return parseSimYamlV1(root);
 }

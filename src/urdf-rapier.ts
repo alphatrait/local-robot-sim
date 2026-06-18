@@ -1,4 +1,5 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
+import type { DriveModel } from './types';
 import type { UrdfGeometry, UrdfJoint, UrdfModel } from './urdf-parser';
 import {
   composeTransforms,
@@ -151,6 +152,19 @@ function isDiffDriveModel(model: UrdfModel): boolean {
   return jointNames.has('left_wheel_joint') && jointNames.has('right_wheel_joint');
 }
 
+function shouldUseDiffDrive(model: UrdfModel, driveModel: DriveModel): boolean {
+  if (driveModel === 'articulated') return false;
+  if (driveModel === 'diff_drive') {
+    if (!isDiffDriveModel(model)) {
+      throw new Error(
+        'drive_model: diff_drive requires left_wheel_joint and right_wheel_joint in URDF',
+      );
+    }
+    return true;
+  }
+  return isDiffDriveModel(model);
+}
+
 function buildDiffDriveKinematic(
   R: typeof RAPIER,
   world: RAPIER.World,
@@ -209,8 +223,9 @@ export function buildRobotFromUrdf(
   world: RAPIER.World,
   model: UrdfModel,
   spawn: Transform3D = DEFAULT_SPAWN,
+  driveModel: DriveModel = 'auto',
 ): UrdfRobotBuildResult {
-  if (isDiffDriveModel(model)) {
+  if (shouldUseDiffDrive(model, driveModel)) {
     return buildDiffDriveKinematic(R, world, model, spawn);
   }
 

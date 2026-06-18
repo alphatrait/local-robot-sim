@@ -1,4 +1,8 @@
-examples:
-  - id: diff-drive
-    path: examples/diff-drive
-    label: Differential drive box
+examples:
+  - id: diff-drive
+    path: simulations/diff-drive
+    label: Differential drive box (legacy)
+
+  - id: modular-demo
+    path: simulations/modular-demo
+    label: Modular env + bot demo

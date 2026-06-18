@@ -1,0 +1,21 @@
+version: 1
+name: modular-demo-room
+
+physics:
+  gravity: [0, -9.81, 0]
+  friction: 0.8
+
+ground:
+  size: [20, 20]
+  thickness: 0.1
+
+static_bodies:
+  wall_north:
+    shape: box
+    size: [8, 2, 0.2]
+    position: [0, 1, -4]
+
+visuals:
+  grid_size: 40
+  fog_color: 0x0f1117
+  ground_color: 0x151922

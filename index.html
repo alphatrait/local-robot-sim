@@ -42,17 +42,81 @@
       #sidebar {
         display: flex;
         flex-direction: column;
-        gap: 12px;
-        padding: 16px;
         border-left: 1px solid #2a2f3a;
         background: #151922;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .tab-bar {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 2px;
+        padding: 6px 6px 0;
+        border-bottom: 1px solid #2a2f3a;
+        flex-shrink: 0;
+      }
+
+      .tab {
+        appearance: none;
+        border: none;
+        border-radius: 4px 4px 0 0;
+        background: transparent;
+        color: #9aa0a6;
+        font: inherit;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        padding: 6px 4px;
+        cursor: pointer;
+      }
+
+      .tab:hover {
+        color: #e8eaed;
+        background: #1c212b;
+      }
+
+      .tab.active {
+        color: #e8eaed;
+        background: #0f1117;
+        box-shadow: inset 0 -2px 0 #1a73e8;
+      }
+
+      .tab-content {
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .tab-panel {
+        display: none;
+        flex-direction: column;
+        gap: 10px;
+        height: 100%;
+        padding: 10px;
         overflow-y: auto;
       }
 
+      .tab-panel.active {
+        display: flex;
+      }
+
+      .tab-panel.fill {
+        padding: 10px;
+      }
+
+      .tab-panel.fill .panel-grow {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
       h1 {
-        font-size: 14px;
+        font-size: 11px;
         font-weight: 600;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.06em;
         text-transform: uppercase;
         color: #9aa0a6;
       }
@@ -60,59 +124,79 @@
       .panel {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
+      }
+
+      .actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+
+      .actions button {
+        width: 100%;
+      }
+
+      .actions .full {
+        grid-column: 1 / -1;
       }
 
       label {
-        font-size: 11px;
+        font-size: 10px;
         color: #9aa0a6;
       }
 
       input,
       textarea,
       select,
-      button {
+      button.action {
         font: inherit;
         border-radius: 6px;
         border: 1px solid #3c4454;
         background: #0f1117;
         color: #e8eaed;
-        padding: 8px 10px;
+        padding: 7px 9px;
+        font-size: 12px;
       }
 
       textarea {
-        min-height: 180px;
-        resize: vertical;
+        flex: 1;
+        min-height: 0;
+        resize: none;
         line-height: 1.4;
       }
 
-      button {
+      button.action {
         cursor: pointer;
         background: #1a73e8;
         border-color: #1a73e8;
         font-weight: 600;
       }
 
-      button:hover {
+      button.action:hover {
         filter: brightness(1.08);
       }
 
-      button.secondary {
+      button.action.secondary {
         background: #252b36;
         border-color: #3c4454;
       }
 
       #status {
-        font-size: 12px;
+        font-size: 11px;
         line-height: 1.5;
         white-space: pre-wrap;
         color: #bdc1c6;
+        padding: 8px;
+        border: 1px solid #2a2f3a;
+        border-radius: 6px;
+        background: #0f1117;
       }
 
       #log {
         flex: 1;
-        min-height: 120px;
-        overflow-y: auto;
+        min-height: 0;
+        overflow: hidden;
         font-size: 11px;
         line-height: 1.45;
         color: #9aa0a6;
@@ -120,6 +204,102 @@
         border-radius: 6px;
         padding: 8px;
         background: #0f1117;
+      }
+
+      #log-measurer {
+        position: absolute;
+        visibility: hidden;
+        pointer-events: none;
+        left: -9999px;
+        top: 0;
+        font-size: 11px;
+        line-height: 1.45;
+      }
+
+      .log-line {
+        margin-bottom: 4px;
+        word-break: break-word;
+      }
+
+      .log-line:last-child {
+        margin-bottom: 0;
+      }
+
+      .log-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .log-filters {
+        display: flex;
+        gap: 4px;
+      }
+
+      .filter-chip {
+        appearance: none;
+        border: 1px solid #3c4454;
+        border-radius: 4px;
+        background: #0f1117;
+        color: #9aa0a6;
+        font: inherit;
+        font-size: 9px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        padding: 3px 6px;
+        cursor: pointer;
+        opacity: 0.45;
+      }
+
+      .filter-chip.active {
+        opacity: 1;
+        border-color: #5f6368;
+        color: #c8ccd0;
+      }
+
+      .filter-chip[data-level='info'].active {
+        background: rgba(143, 181, 160, 0.14);
+        border-color: rgba(143, 181, 160, 0.45);
+        color: #8fb5a0;
+      }
+
+      .filter-chip[data-level='warn'].active {
+        background: rgba(201, 184, 138, 0.14);
+        border-color: rgba(201, 184, 138, 0.45);
+        color: #c9b88a;
+      }
+
+      .filter-chip[data-level='error'].active {
+        background: rgba(201, 154, 149, 0.14);
+        border-color: rgba(201, 154, 149, 0.45);
+        color: #c99a95;
+      }
+
+      .log-pager {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .log-pager button {
+        flex: 1;
+        padding: 5px 8px;
+        font-size: 11px;
+      }
+
+      #log-page {
+        font-size: 10px;
+        color: #9aa0a6;
+        white-space: nowrap;
+      }
+
+      .log-panel {
+        gap: 6px;
       }
 
       .badge {
@@ -150,46 +330,85 @@
     <div id="app">
       <div id="viewport"></div>
       <aside id="sidebar">
-        <h1>Local Robot Sim</h1>
-        <div id="status">Booting…</div>
-        <div class="panel">
-          <label for="sync-mode">Sync mode</label>
-          <select id="sync-mode">
-            <option value="local">Local folder (instant)</option>
-            <option value="github">GitHub (remote)</option>
-            <option value="manual">Manual paste</option>
-          </select>
-        </div>
-        <div class="panel">
-          <label for="project-root">Project root (inside repo)</label>
-          <input id="project-root" type="text" placeholder="examples/diff-drive or empty for repo root" />
-        </div>
-        <div class="panel">
-          <label for="example-select">Example (from examples.yaml)</label>
-          <select id="example-select">
-            <option value="">— custom path above —</option>
-          </select>
-        </div>
-        <div class="panel" id="github-panel" hidden>
-          <label for="github-repo">GitHub repo (owner/name)</label>
-          <input id="github-repo" type="text" placeholder="you/my-robot-project" />
-          <label for="github-branch">Branch</label>
-          <input id="github-branch" type="text" value="main" />
-          <label for="github-token">PAT (optional, for API polling)</label>
-          <input id="github-token" type="password" placeholder="ghp_…" autocomplete="off" />
-        </div>
-        <div class="panel">
-          <button id="pick-folder" class="secondary">Pick project folder</button>
-          <button id="reload-controller">Reload controller</button>
-          <button id="soft-reset" class="secondary">Soft reset robot</button>
-        </div>
-        <div class="panel">
-          <label for="controller-source">Controller (Python)</label>
-          <textarea id="controller-source" spellcheck="false"></textarea>
-        </div>
-        <div class="panel">
-          <label>Log</label>
-          <div id="log"></div>
+        <nav class="tab-bar" role="tablist">
+          <button type="button" class="tab active" data-tab="info" role="tab" aria-selected="true">Info</button>
+          <button type="button" class="tab" data-tab="controller" role="tab" aria-selected="false">Controller</button>
+          <button type="button" class="tab" data-tab="logs" role="tab" aria-selected="false">Logs</button>
+          <button type="button" class="tab" data-tab="settings" role="tab" aria-selected="false">Settings</button>
+        </nav>
+
+        <div class="tab-content">
+          <section class="tab-panel active" data-tab-panel="info" role="tabpanel">
+            <h1>Local Robot Sim</h1>
+            <div id="status">Booting…</div>
+            <div class="panel">
+              <label>Actions</label>
+              <div class="actions">
+                <button id="pause-simulation" type="button" class="action secondary">Pause</button>
+                <button id="soft-reset" type="button" class="action secondary">Soft reset</button>
+                <button id="reload-controller" type="button" class="action full">Reload controller</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel fill" data-tab-panel="controller" role="tabpanel">
+            <div class="panel panel-grow">
+              <label for="controller-source">Controller (Python)</label>
+              <textarea id="controller-source" spellcheck="false"></textarea>
+            </div>
+          </section>
+
+          <section class="tab-panel fill" data-tab-panel="logs" role="tabpanel">
+            <div class="panel panel-grow log-panel">
+              <div class="log-toolbar">
+                <label>Log</label>
+                <div class="log-filters">
+                  <button type="button" class="filter-chip active" data-level="info">Info</button>
+                  <button type="button" class="filter-chip active" data-level="warn">Warn</button>
+                  <button type="button" class="filter-chip active" data-level="error">Error</button>
+                </div>
+              </div>
+              <div id="log"></div>
+              <div id="log-measurer"></div>
+              <div class="log-pager">
+                <button id="log-prev" type="button" class="action secondary" disabled>Newer</button>
+                <span id="log-page">No logs</span>
+                <button id="log-next" type="button" class="action secondary" disabled>Older</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" data-tab-panel="settings" role="tabpanel">
+            <div class="panel">
+              <label for="sync-mode">Sync mode</label>
+              <select id="sync-mode">
+                <option value="local">Local folder (instant)</option>
+                <option value="github">GitHub (remote)</option>
+                <option value="manual">Manual paste</option>
+              </select>
+            </div>
+            <div class="panel">
+              <label for="project-root">Project root (inside repo)</label>
+              <input id="project-root" type="text" placeholder="simulations/diff-drive or empty for repo root" />
+            </div>
+            <div class="panel">
+              <label for="example-select">Simulation (from examples.yaml)</label>
+              <select id="example-select">
+                <option value="">— custom path above —</option>
+              </select>
+            </div>
+            <div class="panel" id="github-panel" hidden>
+              <label for="github-repo">GitHub repo (owner/name)</label>
+              <input id="github-repo" type="text" placeholder="you/my-robot-project" />
+              <label for="github-branch">Branch</label>
+              <input id="github-branch" type="text" value="main" />
+              <label for="github-token">PAT (optional, for API polling)</label>
+              <input id="github-token" type="password" placeholder="ghp_…" autocomplete="off" />
+            </div>
+            <div class="panel">
+              <button id="pick-folder" type="button" class="action secondary">Pick project folder</button>
+            </div>
+          </section>
         </div>
       </aside>
     </div>

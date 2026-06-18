@@ -1,7 +1,6 @@
 import type { ProjectContext, SyncBundle } from './types';
-import { parseSimYaml } from './sim-yaml';
 import { joinProjectPath } from './project-path';
-import { resolveExamplePaths } from './examples-manifest';
+import { loadSimulationBundle, type SimulationFileReader } from './sim-loader';
 
 export interface GitHubSyncOptions {
   owner: string;
@@ -15,7 +14,7 @@ export interface GitHubSyncOptions {
 export interface LocalSyncOptions {
   /** Repository root selected via File System Access API. */
   repoHandle: FileSystemDirectoryHandle;
-  /** Example subpath inside the repo, e.g. "examples/diff-drive". */
+  /** Project subpath inside the repo, e.g. "simulations/diff-drive". */
   projectRoot?: string;
 }
 
@@ -158,23 +157,25 @@ export class GitHubSync {
   }
 
   async readOnce(): Promise<SyncBundle> {
-    const simYamlPath = joinProjectPath(this.options.projectRoot, 'sim.yaml');
-    const simYaml = await this.fetchRaw(simYamlPath);
-    const config = parseSimYaml(simYaml);
-    const paths = resolveExamplePaths(this.options.projectRoot, {
-      urdf: config.robot.urdf,
-      controller: config.controller.path,
-    });
-    const controllerPython = await this.fetchRaw(paths.controller);
-    const urdfXml = await this.fetchRaw(paths.urdf);
-    const revision = await this.digestText(simYaml + urdfXml + controllerPython);
-    this.revision = revision;
+    const bundle = await loadSimulationBundle(
+      projectContext(this.options.projectRoot),
+      this.createReader(),
+    );
+    this.revision = bundle.revision;
+    return bundle;
+  }
+
+  private createReader(): SimulationFileReader {
     return {
-      project: projectContext(this.options.projectRoot),
-      config,
-      controllerPython,
-      urdfXml,
-      revision,
+      readText: (path) => this.fetchRaw(path),
+      exists: async (path) => {
+        try {
+          await this.fetchRaw(path);
+          return true;
+        } catch {
+          return false;
+        }
+      },
     };
   }
 
@@ -198,43 +199,26 @@ export class GitHubSync {
     const nextEtag = response.headers.get('ETag');
     if (nextEtag) this.etag = nextEtag;
 
-    const simYaml = await response.text();
-    const config = parseSimYaml(simYaml);
-    const paths = resolveExamplePaths(this.options.projectRoot, {
-      urdf: config.robot.urdf,
-      controller: config.controller.path,
-    });
-    const controllerPython = await this.fetchRaw(paths.controller);
-    const urdfXml = await this.fetchRaw(paths.urdf);
-    const revision = `${this.options.branch}:${await this.digestText(simYaml + urdfXml + controllerPython)}`;
+    const bundle = await loadSimulationBundle(
+      projectContext(this.options.projectRoot),
+      this.createReader(),
+    );
+    const revision = `${this.options.branch}:${bundle.revision}`;
     if (revision === this.revision) return null;
 
-    const bundle: SyncBundle = {
-      project: projectContext(this.options.projectRoot),
-      config,
-      controllerPython,
-      urdfXml,
-      revision,
-    };
+    bundle.revision = revision;
     this.revision = revision;
     this.emit(bundle);
     return bundle;
   }
 
-  private async fetchBundle(revision: string, simYamlPath: string): Promise<SyncBundle> {
-    const simYaml = await this.fetchRaw(simYamlPath);
-    const config = parseSimYaml(simYaml);
-    const paths = resolveExamplePaths(this.options.projectRoot, {
-      urdf: config.robot.urdf,
-      controller: config.controller.path,
-    });
-    const controllerPython = await this.fetchRaw(paths.controller);
-    const urdfXml = await this.fetchRaw(paths.urdf);
+  private async fetchBundle(revision: string, _simYamlPath: string): Promise<SyncBundle> {
+    const bundle = await loadSimulationBundle(
+      projectContext(this.options.projectRoot),
+      this.createReader(),
+    );
     return {
-      project: projectContext(this.options.projectRoot),
-      config,
-      controllerPython,
-      urdfXml,
+      ...bundle,
       revision,
     };
   }
@@ -246,12 +230,6 @@ export class GitHubSync {
       throw new Error(`Failed to fetch ${path} (${response.status})`);
     }
     return response.text();
-  }
-
-  private async digestText(value: string): Promise<string> {
-    const data = new TextEncoder().encode(value);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
 
   private emit(bundle: SyncBundle): void {
@@ -334,29 +312,10 @@ export class LocalFolderSync {
   }
 
   async readOnce(): Promise<SyncBundle> {
-    const simYamlPath = joinProjectPath(this.projectRoot, 'sim.yaml');
-    const simYaml = await readFileFromHandle(this.repoHandle, simYamlPath);
-    const config = parseSimYaml(simYaml);
-    const paths = resolveExamplePaths(this.projectRoot, {
-      urdf: config.robot.urdf,
-      controller: config.controller.path,
+    return loadSimulationBundle(projectContext(this.projectRoot), {
+      readText: (path) => readFileFromHandle(this.repoHandle, path),
+      exists: (path) => fileExistsInHandle(this.repoHandle, path),
     });
-    const controllerPython = await readFileFromHandle(this.repoHandle, paths.controller);
-    const urdfXml = await readFileFromHandle(this.repoHandle, paths.urdf);
-    const revision = await this.digestText(simYaml + urdfXml + controllerPython);
-    return {
-      project: projectContext(this.projectRoot),
-      config,
-      controllerPython,
-      urdfXml,
-      revision,
-    };
-  }
-
-  private async digestText(value: string): Promise<string> {
-    const data = new TextEncoder().encode(value);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
   }
 
   private emit(bundle: SyncBundle): void {
