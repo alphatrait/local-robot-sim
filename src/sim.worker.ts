@@ -16,8 +16,9 @@ import {
   type PrismaticMotor,
   type RapierTrackedBody,
   type RevoluteMotor,
+  type WheelVisualOffset,
 } from './urdf-rapier';
-import type { Transform3D } from './urdf-math';
+import { composeTransforms, type Transform3D } from './urdf-math';
 
 const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -31,6 +32,7 @@ let trackedBodies: RapierTrackedBody[] = [];
 let revoluteMotors: Map<string, RevoluteMotor> = new Map();
 let prismaticMotors: Map<string, PrismaticMotor> = new Map();
 let robotLinkNames = new Set<string>();
+let wheelVisualOffsets: WheelVisualOffset[] = [];
 
 let config: SimYamlConfig = DEFAULT_SIM_CONFIG;
 let robotModel: UrdfModel | null = null;
@@ -89,6 +91,7 @@ function clearWorld(): void {
   revoluteMotors.clear();
   prismaticMotors.clear();
   robotLinkNames.clear();
+  wheelVisualOffsets = [];
   trackedBodies = [];
   world?.free();
   world = null;
@@ -115,6 +118,7 @@ function buildSceneFromUrdf(): void {
     robotLinkNames = robot.robotLinkNames;
     revoluteMotors = robot.revoluteMotors;
     prismaticMotors = robot.prismaticMotors;
+    wheelVisualOffsets = robot.wheelVisualOffsets ?? [];
     log('info', `URDF loaded: ${robotModel.name} (${robotModel.links.length} links)`);
     post({ type: 'WORLD_LOADED', linkNames: [...robotLinkNames] });
   } catch (error) {
@@ -150,8 +154,14 @@ function applyDiffDriveKinematics(): void {
   const yawRate = ((right - left) / trackWidth) * wheelRadius;
 
   const lv = base.body.linvel();
-  base.body.setLinvel({ x: lv.x, y: lv.y, z: linear }, true);
+  base.body.setLinvel({ x: lv.x, y: 0, z: linear }, true);
   base.body.setAngvel({ x: 0, y: yawRate, z: 0 }, true);
+
+  const t = base.body.translation();
+  const spawnY = spawnTransform().xyz[1];
+  if (Math.abs(t.y - spawnY) > 0.001) {
+    base.body.setTranslation({ x: t.x, y: spawnY, z: t.z }, true);
+  }
 }
 
 function collectTransforms(): BodyTransform[] {
@@ -170,6 +180,31 @@ function collectTransforms(): BodyTransform[] {
       qw: r.w,
     });
   }
+
+  const base = scratchTransforms.find((body) => body.id === 'base_link');
+  if (base && wheelVisualOffsets.length > 0) {
+    const basePose: Transform3D = {
+      xyz: [base.x, base.y, base.z],
+      quat: [base.qx, base.qy, base.qz, base.qw],
+    };
+    for (const wheel of wheelVisualOffsets) {
+      const world = composeTransforms(basePose, {
+        xyz: wheel.localXyz,
+        rpy: wheel.localRpy,
+      });
+      scratchTransforms.push({
+        id: wheel.linkId,
+        x: world.xyz[0],
+        y: world.xyz[1],
+        z: world.xyz[2],
+        qx: world.quat[0],
+        qy: world.quat[1],
+        qz: world.quat[2],
+        qw: world.quat[3],
+      });
+    }
+  }
+
   return scratchTransforms;
 }
 
@@ -217,7 +252,9 @@ function simulationTick(): void {
   const dt = integrationParameters.dt;
   runControllerStep(dt);
   applyDiffDriveKinematics();
-  applyJointMotors();
+  if (wheelVisualOffsets.length === 0) {
+    applyJointMotors();
+  }
   world.step();
   simTime += dt;
 

@@ -25,11 +25,19 @@ export interface PrismaticMotor {
   targetVelocity: number;
 }
 
+export interface WheelVisualOffset {
+  linkId: string;
+  localXyz: [number, number, number];
+  localRpy: [number, number, number];
+}
+
 export interface UrdfRobotBuildResult {
   trackedBodies: RapierTrackedBody[];
   revoluteMotors: Map<string, RevoluteMotor>;
   prismaticMotors: Map<string, PrismaticMotor>;
   robotLinkNames: Set<string>;
+  wheelVisualOffsets?: WheelVisualOffset[];
+  kinematicDrive?: boolean;
 }
 
 const IDENTITY: Transform3D = {
@@ -138,12 +146,74 @@ function axisInParentFrame(
   return { x: rotated[0] / len, y: rotated[1] / len, z: rotated[2] / len };
 }
 
+function isDiffDriveModel(model: UrdfModel): boolean {
+  const jointNames = new Set(model.joints.map((joint) => joint.name));
+  return jointNames.has('left_wheel_joint') && jointNames.has('right_wheel_joint');
+}
+
+function buildDiffDriveKinematic(
+  R: typeof RAPIER,
+  world: RAPIER.World,
+  model: UrdfModel,
+  spawn: Transform3D,
+): UrdfRobotBuildResult {
+  const linkTransforms = buildLinkTransforms(model, spawn);
+  const baseFrame = linkTransforms.get('base_link') ?? spawn;
+  const revoluteMotors = new Map<string, RevoluteMotor>();
+  const wheelVisualOffsets: WheelVisualOffset[] = [];
+
+  const bodyDesc = R.RigidBodyDesc.kinematicVelocityBased()
+    .setTranslation(baseFrame.xyz[0], baseFrame.xyz[1], baseFrame.xyz[2])
+    .setRotation(rapierRotation(baseFrame.quat));
+
+  const body = world.createRigidBody(bodyDesc);
+
+  // Chassis collider: bottom face sits on ground top (y = 0.05).
+  const chassis = R.ColliderDesc.cuboid(0.35, 0.08, 0.25);
+  chassis.setTranslation(0, 0.08, 0);
+  chassis.setFriction(1.2);
+  chassis.setRestitution(0.0);
+  world.createCollider(chassis, body);
+
+  for (const joint of model.joints) {
+    if (!joint.name.includes('wheel')) continue;
+    revoluteMotors.set(joint.name, { targetVelocity: 0 });
+    wheelVisualOffsets.push({
+      linkId: joint.child,
+      localXyz: joint.origin.xyz,
+      localRpy: joint.origin.rpy,
+    });
+  }
+
+  const trackedBodies: RapierTrackedBody[] = [
+    {
+      id: 'base_link',
+      body,
+      initialTranslation: body.translation(),
+      initialRotation: body.rotation(),
+    },
+  ];
+
+  return {
+    trackedBodies,
+    revoluteMotors,
+    prismaticMotors: new Map(),
+    robotLinkNames: new Set(model.links.map((link) => link.name)),
+    wheelVisualOffsets,
+    kinematicDrive: true,
+  };
+}
+
 export function buildRobotFromUrdf(
   R: typeof RAPIER,
   world: RAPIER.World,
   model: UrdfModel,
   spawn: Transform3D = DEFAULT_SPAWN,
 ): UrdfRobotBuildResult {
+  if (isDiffDriveModel(model)) {
+    return buildDiffDriveKinematic(R, world, model, spawn);
+  }
+
   const linkTransforms = buildLinkTransforms(model, spawn);
   const bodies = new Map<string, RAPIER.RigidBody>();
   const trackedBodies: RapierTrackedBody[] = [];
